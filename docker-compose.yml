@@ -1,0 +1,85 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: search
+      POSTGRES_PASSWORD: search
+      POSTGRES_DB: search
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U search -d search"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.17.3
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  postgres-test:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: search
+      POSTGRES_PASSWORD: search
+      POSTGRES_DB: search_test
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U search -d search_test"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  elasticsearch-test:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.17.3
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  api:
+    build: .
+    environment:
+      DATABASE_URL: postgresql+asyncpg://search:search@postgres:5432/search
+      ES_URL: http://elasticsearch:9200
+      ES_INDEX_NAME: posts-v1
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+    volumes:
+      - ./posts.csv:/data/posts.csv:ro
+
+  tests:
+    build: .
+    profiles: ["test"]
+    environment:
+      DATABASE_URL: postgresql+asyncpg://search:search@postgres-test:5432/search_test
+      ES_URL: http://elasticsearch-test:9200
+      ES_INDEX_NAME: posts-v1-test
+    depends_on:
+      postgres-test:
+        condition: service_healthy
+      elasticsearch-test:
+        condition: service_healthy
+    volumes:
+      - ./posts.csv:/data/posts.csv:ro
+    command:
+      [
+        "sh",
+        "-c",
+        "alembic upgrade head && exec pytest -v",
+      ]
